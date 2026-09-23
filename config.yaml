@@ -1,0 +1,107 @@
+# ---------------------------------------------------------------------------
+# LiteraView AI — MVP configuration
+#
+# This file *is* the "approved corpus" boundary from the PRD. Nothing gets
+# pulled into the system unless it's listed here. Gutenberg IDs are stable
+# but do occasionally get corrected/reassigned, so download_gutenberg.py
+# prints the actual "Title:" line from each downloaded file — check it
+# once against the titles below before you build the index.
+# ---------------------------------------------------------------------------
+
+authors:
+  mark_twain:
+    display_name: "Mark Twain"
+
+    # Literature corpus: novels / plays / stories -> used for both
+    # "specific work" and "across works" (oeuvre) routing paths.
+    literature:
+      - title: "The Adventures of Tom Sawyer"
+        gutenberg_id: 74
+      - title: "Adventures of Huckleberry Finn"
+        gutenberg_id: 76
+      - title: "A Connecticut Yankee in King Arthur's Court"
+        gutenberg_id: 86
+      - title: "The Prince and the Pauper"
+        gutenberg_id: 1837
+      - title: "Life on the Mississippi"
+        gutenberg_id: 245
+      - title: "Sketches New and Old, Complete"
+        gutenberg_id: 3189
+      - title: "Sketches New and Old, Part 1"
+        gutenberg_id: 5836
+
+    # Life & Process corpus: letters / autobiography / essays about craft,
+    # worldview, biography -> kept in a completely separate retrieval
+    # boundary, never mixed with literature chunks.
+    life_process:
+      - title: "Chapters from My Autobiography"
+        gutenberg_id: 19987
+
+  # Add more authors here later, e.g.:
+  # anton_chekhov:
+  #   display_name: "Anton Chekhov"
+  #   literature: []
+  #   life_process: []
+  # george_eliot:
+  #   display_name: "George Eliot"
+  #   literature: []
+  #   life_process: []
+
+# ---------------------------------------------------------------------------
+embedding:
+  # "local"  -> free, runs on CPU, no API calls, no rate limits.
+  # "gemini" -> uses Google's free-tier embedding model instead (needs
+  #             GOOGLE_API_KEY). Only switch to this if you want the whole
+  #             stack on one provider; local is fine and faster to build.
+  provider: "local"
+  local_model: "sentence-transformers/all-MiniLM-L6-v2"
+  gemini_model: "models/text-embedding-004"
+
+# ---------------------------------------------------------------------------
+llm:
+  provider: "groq"
+  gemini_model: "gemini-3.6-flash"
+  groq_model: "openai/gpt-oss-120b"
+  temperature: 0.2
+  max_output_tokens: 800
+
+# ---------------------------------------------------------------------------
+chunking:
+  chunk_size: 1000
+  chunk_overlap: 150
+
+# ---------------------------------------------------------------------------
+retrieval:
+  top_k: 5
+  # Chroma returns a *distance* (lower = more similar) for cosine space.
+  # Above this distance we treat the match as "not really relevant" and
+  # trigger the safe fallback instead of calling the LLM.
+  # Now that the vector store uses cosine distance + normalized embeddings
+  # (fixed after the earlier L2/cosine mismatch bug), 0.65 is a reasonable
+  # starting point for all-MiniLM-L6-v2. Run scripts/debug_retrieval.py to
+  # check real distances for your own queries and tighten/loosen this.
+  max_distance: 0.65
+
+# ---------------------------------------------------------------------------
+vectorstore:
+  persist_dir: "data/processed/chroma"
+  collection_name: "literaview"
+
+paths:
+  raw_dir: "data/raw"
+  corpus_file: "data/processed/corpus.jsonl"
+  deduped_corpus_file: "data/processed/corpus.deduped.jsonl"
+  dedup_report_file: "data/processed/dedup_report.jsonl"
+
+# ---------------------------------------------------------------------------
+dedup:
+  # Word-sequence length used for near-duplicate fingerprinting.
+  shingle_size: 10
+  # Two sections are treated as the same piece if their shingle overlap
+  # meets this threshold. Raise it (toward 1.0) if you see false matches
+  # in dedup_report.jsonl; lower it if you suspect real duplicates are
+  # slipping through.
+  jaccard_threshold: 0.6
+  # Sections whose lengths differ by more than this fraction are never
+  # compared -- keeps the near-duplicate pass fast on a large bibliography.
+  length_ratio_tolerance: 0.3

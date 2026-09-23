@@ -1,0 +1,17 @@
+# secrets
+
+# python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# data artifacts (regeneratable via scripts/, keep the repo light)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+tests/
+# streamlit
+.streamlit/
