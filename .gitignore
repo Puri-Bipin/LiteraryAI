@@ -1,5 +1,6 @@
 # secrets
-
+.env
+.streamlit/secrets.toml
 # python
 .venv/
 venv/
@@ -7,10 +8,13 @@ __pycache__/
 *.pyc
 
 # data artifacts (regeneratable via scripts/, keep the repo light)
-data/raw/*
-data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+
+# runtime conversation history: per-user, regenerated constantly, and
+# ephemeral on Streamlit Community Cloud anyway (wiped on hibernation/
+# redeploy) -- never worth versioning
+data/processed/conversations.db
 
 tests/
 # streamlit

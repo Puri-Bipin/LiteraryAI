@@ -14,12 +14,30 @@ Run with:  streamlit run src/app/streamlit_app.py
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import streamlit as st
+
+# --- Streamlit Community Cloud secrets bridge --------------------------------
+# Locally, API keys come from .env via python-dotenv (see src/config.py).
+# On Community Cloud there is no .env file -- keys are pasted into the
+# dashboard's "Secrets" field instead, and Streamlit exposes them via
+# st.secrets, not automatically as environment variables. The rest of the
+# app (src/generation/llm.py, src/indexing/embeddings.py) reads keys with
+# os.getenv(), so we copy anything found in st.secrets into os.environ here,
+# once, before any of that code runs. Wrapped in try/except because
+# st.secrets raises if no secrets.toml exists at all, which is the normal
+# case for local development.
+try:
+    for _key in ("GOOGLE_API_KEY", "GROQ_API_KEY"):
+        if _key in st.secrets and not os.environ.get(_key):
+            os.environ[_key] = st.secrets[_key]
+except Exception:
+    pass
 
 from src.app import conversation_store as store
 from src.config import CONFIG
@@ -104,9 +122,6 @@ for conv in conversations:
 st.sidebar.divider()
 
 # --- Sidebar: Steps 1 & 2 of the PRD flow -----------------------------------
-# Disabled once a conversation has a first message, since a conversation is
-# anchored to the author/mode it was started with -- switching mid-thread
-# would silently change what corpus the rest of the conversation is grounded in.
 locked = st.session_state.current_conversation_id is not None
 
 selected_author_key = st.sidebar.selectbox(
@@ -163,8 +178,6 @@ placeholder = (
 question = st.chat_input(placeholder)
 
 if question:
-    # Lazily create the conversation on the first message, anchored to
-    # whatever author/mode is currently selected.
     if st.session_state.current_conversation_id is None:
         st.session_state.current_conversation_id = store.create_conversation(
             author_key=selected_author_key, mode=selected_mode, title=question
@@ -208,4 +221,4 @@ if question:
         {"role": "assistant", "content": result.answer, "sources": result.sources}
     )
     store.add_message(conv_id, "assistant", result.answer, result.sources)
-    st.rerun()  # refresh sidebar so the conversation title/order updates
+    st.rerun()
