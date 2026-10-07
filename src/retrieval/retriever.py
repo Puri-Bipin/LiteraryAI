@@ -27,26 +27,32 @@ def get_vectorstore() -> Chroma:
 
 
 def _build_filter(author_key: str, decision: RouteDecision) -> dict:
-    clauses = [{"author_key": author_key}, {"mode": "life_process" if decision.scope == "life_process" else "literature"}]
+    clauses = [
+        {"author_key": author_key},
+        {"mode": "life_process" if decision.scope == "life_process" else "literature"},
+    ]
     if decision.scope == "specific_work":
         clauses.append({"work_title": decision.work_title})
     return {"$and": clauses} if len(clauses) > 1 else clauses[0]
 
 
+def _top_k_for(decision: RouteDecision) -> int:
+    # A specific-work search is already narrowed to one book, so it's cheap
+    # and safe to search deeper -- helps surface buried, very specific
+    # details (e.g. "what books sit on the table in Chapter XVII") that a
+    # shallower top_k can miss in a broader pool.
+    if decision.scope == "specific_work":
+        return CONFIG["retrieval"].get("top_k_specific_work", CONFIG["retrieval"]["top_k"])
+    return CONFIG["retrieval"]["top_k"]
+
+
 def retrieve(question: str, author_key: str, decision: RouteDecision) -> list[tuple[Document, float]]:
-    """Returns [(document, distance), ...] — lower distance = more similar."""
+    """Returns [(document, distance), ...] -- lower distance = more similar."""
     vectorstore = get_vectorstore()
     where = _build_filter(author_key, decision)
-    top_k = CONFIG["retrieval"]["top_k"]
+    top_k = _top_k_for(decision)
 
-    results = vectorstore.similarity_search_with_score(query=question, k=top_k, filter=where)
-
-    print(f"\n[DEBUG] filter used: {where}")
-    print(f"[DEBUG] {len(results)} raw results returned:")
-    for doc, score in results:
-        print(f"        distance={score:.4f}  work_title={doc.metadata.get('work_title')!r}  mode={doc.metadata.get('mode')!r}")
-
-    return results
+    return vectorstore.similarity_search_with_score(query=question, k=top_k, filter=where)
 
 
 def filter_by_relevance(scored_docs: list[tuple[Document, float]]) -> list[tuple[Document, float]]:

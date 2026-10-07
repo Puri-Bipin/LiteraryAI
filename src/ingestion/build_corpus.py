@@ -27,20 +27,29 @@ from src.config import CONFIG, project_path, iter_works
 from src.ingestion.clean_text import clean
 from src.ingestion.download_gutenberg import slugify
 
-# Matches three known Gutenberg heading styles used across Twain's works:
+# Matches four known Gutenberg heading styles used across Twain's works:
 #   1. "CHAPTER I.", "Chapter 3", "ACT III", "SCENE 2"
-#   2. "CHAPTERS FROM MY AUTOBIOGRAPHY.--III."  (dash + roman numeral)
+#   2. "CHAPTERS FROM MY AUTOBIOGRAPHY.--III."  (title + dash + roman numeral)
 #   3. A bare, short, ALL-CAPS title standing alone on its own line, blank
 #      lines both before and after -- the format most short-story
 #      collections use for each story's heading, e.g. "THE JUMPING FROG",
-#      "MY WATCH", "JOURNALISM IN TENNESSEE" (no "CHAPTER" word, no numeral).
-#      Requires blank-line isolation on both sides specifically to avoid
-#      matching an all-caps word or short shout embedded inside a paragraph.
+#      "MY WATCH" (no "CHAPTER" word, no numeral). Requires blank-line
+#      isolation on both sides specifically to avoid matching an all-caps
+#      word or short shout embedded inside a paragraph.
+#   4. "XLV. LETTERS, 1906, TO VARIOUS PERSONS..." -- the format Twain's
+#      published Letters volumes use: a roman numeral, a period, then a
+#      summary of that letter/chapter's contents, all on one line. Note:
+#      in the raw plain-text files, a long heading like this can sometimes
+#      wrap across two physical lines, in which case this pattern will
+#      miss it and the surrounding text gets grouped into the previous
+#      section instead -- check section counts after a first run on a new
+#      Letters volume rather than assuming perfect per-letter granularity.
 SECTION_HEADING_RE = re.compile(
     r"(?:"
     r"^\s*(?:CHAPTER|Chapter|ACT|Act|SCENE|Scene)\s+[IVXLC\d]+\.?.*$"
     r"|^\s*[A-Z][A-Z '\.]{4,80}[.\-\u2013\u2014]{1,3}\s*[IVXLC]+\.?\s*$"
     r"|(?<=\n\n)[A-Z][A-Z0-9 ,'\.\-]{3,69}(?=\n\n)"
+    r"|^\s*[IVXLC]+\.\s+[A-Z].{3,120}$"
     r")",
     re.MULTILINE,
 )

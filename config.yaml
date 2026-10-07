@@ -1,17 +1,33 @@
-# ---------------------------------------------------------------------------
 # LiteraView AI — MVP configuration
 #
 # This file *is* the "approved corpus" boundary from the PRD. Nothing gets
 # pulled into the system unless it's listed here. Gutenberg IDs are stable
 # but do occasionally get corrected/reassigned, so download_gutenberg.py
-# prints the actual "Title:" line from each downloaded file — check it
+# prints the actual "Title:" line from each downloaded file -- check it
 # once against the titles below before you build the index.
 # ---------------------------------------------------------------------------
-
+ 
 authors:
   mark_twain:
     display_name: "Mark Twain"
-
+ 
+    # Short, factual reference info a curator supplies to help the model
+    # correctly resolve names/nicknames the author uses for family members
+    # -- this directly fixes the "mama" = wife (not mother), "Clara" =
+    # daughter (not sister) confusion found in October testing. This is
+    # shown to the LLM as labeled background context, kept separate from
+    # the numbered source passages -- it is never treated as a citable
+    # source, only used to correctly identify who people are.
+    life_process_context: |
+      Samuel Langhorne Clemens wrote under the pen name "Mark Twain." His
+      wife was Olivia Louise Langdon Clemens (sometimes called "Livy"); the
+      Clemens children referred to her as "mama" -- when the text says
+      "mama," it means Olivia (the wife), NOT Twain's own mother (Jane
+      Lampton Clemens). Twain and Olivia's children were: Langdon Clemens
+      (son, died in infancy), Olivia Susan Clemens ("Susy"), Clara Clemens,
+      and Jane Lampton Clemens ("Jean"). Olivia Clemens died in June 1904 in
+      Florence, Italy, after a long illness.
+ 
     # Literature corpus: novels / plays / stories -> used for both
     # "specific work" and "across works" (oeuvre) routing paths.
     literature:
@@ -29,24 +45,38 @@ authors:
         gutenberg_id: 3189
       - title: "Sketches New and Old, Part 1"
         gutenberg_id: 5836
-
+ 
     # Life & Process corpus: letters / autobiography / essays about craft,
     # worldview, biography -> kept in a completely separate retrieval
     # boundary, never mixed with literature chunks.
+    #
+    # Expanded Oct 2026: the single autobiography excerpt alone did not
+    # cover large parts of Twain's personal life (notably anything about
+    # his wife, Olivia) -- these six Gutenberg volumes are his actual
+    # letters, 1853-1910, and should close that gap. Volume 5 specifically
+    # spans 1901-1906, covering Olivia's death in 1904.
     life_process:
       - title: "Chapters from My Autobiography"
         gutenberg_id: 19987
-
+      - title: "Mark Twain's Letters, Volume 1 (1853-1866)"
+        gutenberg_id: 3193
+      - title: "Mark Twain's Letters, Volume 2 (1867-1875)"
+        gutenberg_id: 3194
+      - title: "Mark Twain's Letters, Volume 3 (1876-1885)"
+        gutenberg_id: 3195
+      - title: "Mark Twain's Letters, Volume 4 (1886-1900)"
+        gutenberg_id: 3196
+      - title: "Mark Twain's Letters, Volume 5 (1901-1906)"
+        gutenberg_id: 3197
+      - title: "Mark Twain's Letters, Volume 6 (1907-1910)"
+        gutenberg_id: 3198
+ 
   # Add more authors here later, e.g.:
   # anton_chekhov:
   #   display_name: "Anton Chekhov"
+  #   life_process_context: ""
   #   literature: []
   #   life_process: []
-  # george_eliot:
-  #   display_name: "George Eliot"
-  #   literature: []
-  #   life_process: []
-
 # ---------------------------------------------------------------------------
 embedding:
   # "local"  -> free, runs on CPU, no API calls, no rate limits.
@@ -64,6 +94,28 @@ llm:
   groq_model: "openai/gpt-oss-120b"
   temperature: 0.2
   max_output_tokens: 800
+
+
+
+ 
+# ---------------------------------------------------------------------------
+# Controls on the chatbot's OWN generated voice (not the source corpus).
+generation:
+  # Terms the chatbot must never use in its own narration/explanation.
+  # Deliberately left for your team to populate -- which exact words
+  # belong here is an editorial decision, not an engineering one, and this
+  # file is a better home for that decision than hard-coded Python.
+  # Matching is case-insensitive and whole-word.
+  #
+  # These terms ARE still allowed to appear when they occur inside a
+  # direct quotation copied from the source text (wrapped in quotation
+  # marks) as part of discussing the text's historical/racial context --
+  # see src/generation/rag_chain.py's _apply_restricted_term_filter for
+  # exactly how that distinction is enforced. Replace the placeholder
+  # below with your actual list.
+  restricted_terms:
+    - "REPLACE_WITH_YOUR_TERM"
+ 
 
 # ---------------------------------------------------------------------------
 chunking:

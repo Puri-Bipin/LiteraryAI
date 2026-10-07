@@ -201,6 +201,7 @@ if question:
             )
 
         scope_label = {
+            "meta": "Answered directly from the available catalog (no retrieval needed)",
             "specific_work": f"Scoped to: {result.work_title}",
             "oeuvre": "Scoped to: across all approved literary works",
             "life_process": "Scoped to: letters / autobiography / essays",
