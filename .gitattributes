@@ -1,0 +1,4 @@
+﻿*.sqlite3 binary
+*.bin binary
+*.parquet binary
+data/processed/chroma/** binary
