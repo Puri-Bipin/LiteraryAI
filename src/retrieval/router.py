@@ -5,21 +5,26 @@ question concerns a specific work, the oeuvre, or life/process" and then
 The author and mode are already chosen by the user via the UI (Step 1-2).
 This router has two jobs:
 
-1. Detect "meta" / navigational questions -- "what works are available?",
-   "what can I ask about?" -- which should be answered directly from
-   config.yaml's own list of titles, not routed through retrieval or the
-   LLM at all. (Added Oct 2026 after testing found the chatbot answering
-   "what literary works are available?" as if it were a content question,
-   listing books mentioned INSIDE Twain's stories rather than the actual
-   corpus.)
-2. Inside "Literature" mode, detect whether the question names one
-   specific work (-> restrict retrieval to just that work) or reads as a
-   cross-work question (-> retrieve across the author's whole approved
-   literary corpus).
+1. Detect "meta" / navigational questions -- "what works are available?" --
+   answered directly from config.yaml, no retrieval/LLM involved.
+2. Inside "Literature" mode, detect whether the question names one specific
+   work (-> restrict retrieval to just that work) or reads as a cross-work
+   question (-> retrieve across the author's whole literary corpus).
 
-Both are done with plain string matching / keyword heuristics, deliberately
-NOT an LLM call: free, instant, deterministic, and testable -- and it keeps
-limited LLM free-tier credits for generation, where they're actually needed.
+Both are plain string matching / keyword heuristics, deliberately NOT an
+LLM call: free, instant, deterministic, and testable.
+
+Updated Oct 2026: title matching now uses a WINDOWED comparison, not a
+whole-question comparison. Bug found via testing: "What books appear on
+the table in Chapter XVII of Huckleberry Finn?" scored "Adventures of
+Huckleberry Finn" at only 0.479 (just under the 0.5 threshold) when
+compared against the full 12-word question -- the extra words diluted the
+match even though the title is clearly present. The question fell through
+to "oeuvre" scope instead, searched across all 7 books, and a Tom Sawyer
+passage won by chance. Comparing the title against same-length SLIDING
+WINDOWS of the question instead of the whole question fixes this: the
+window "chapter xvii of huckleberry finn" scores 0.778 against the title,
+comfortably above threshold, with no change to any previously-correct match.
 """
 from __future__ import annotations
 
@@ -39,11 +44,6 @@ def _normalize(s: str) -> str:
 
 
 # --- Meta / navigational question detection ---------------------------------
-# A question is treated as "meta" if it combines an availability word
-# ("available", "have", "offer", "cover", "discuss", "include") with a
-# corpus noun ("works", "texts", "books", "corpus", "sources", "titles").
-# This is a heuristic, not exhaustive -- tune these sets if real usage
-# surfaces phrasings that should (or shouldn't) be caught.
 _AVAILABILITY_WORDS = {"available", "have", "offer", "cover", "discuss", "access", "include", "got"}
 _CORPUS_NOUNS = {
     "works", "work", "texts", "text", "books", "book", "corpus",
@@ -62,12 +62,32 @@ def is_meta_question(question: str) -> bool:
 
 
 # --- Specific-work vs. oeuvre detection --------------------------------------
+def _windowed_best_ratio(norm_question: str, norm_title: str) -> float:
+    """Compares a title against same-length sliding windows of the question,
+    instead of the whole question, so a long natural-language question
+    doesn't dilute an otherwise clear title mention."""
+    q_words = norm_question.split()
+    t_words = norm_title.split()
+    t_len = len(t_words)
+    if t_len == 0:
+        return 0.0
+    if len(q_words) <= t_len:
+        return difflib.SequenceMatcher(None, norm_question, norm_title).ratio()
+
+    best = 0.0
+    for start in range(0, len(q_words) - t_len + 1):
+        window = " ".join(q_words[start:start + t_len])
+        score = difflib.SequenceMatcher(None, window, norm_title).ratio()
+        best = max(best, score)
+    return best
+
+
 def _best_title_match(question: str, known_titles: list[str], threshold: float = 0.5) -> str | None:
     """Find a known work title referenced in the question.
 
     Checks for substantial substring containment first (handles near-exact
-    title mentions reliably), then falls back to difflib similarity ratio
-    against each title.
+    title mentions reliably), then falls back to a windowed similarity
+    ratio against each title.
     """
     norm_question = _normalize(question)
     norm_titles = {title: _normalize(title) for title in known_titles}
@@ -78,7 +98,7 @@ def _best_title_match(question: str, known_titles: list[str], threshold: float =
 
     best_title, best_score = None, 0.0
     for title, norm_title in norm_titles.items():
-        score = difflib.SequenceMatcher(None, norm_question, norm_title).ratio()
+        score = _windowed_best_ratio(norm_question, norm_title)
         if score > best_score:
             best_title, best_score = title, score
 
