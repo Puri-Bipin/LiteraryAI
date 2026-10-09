@@ -1,3 +1,4 @@
+# ---------------------------------------------------------------------------
 # LiteraView AI — MVP configuration
 #
 # This file *is* the "approved corpus" boundary from the PRD. Nothing gets
@@ -6,11 +7,11 @@
 # prints the actual "Title:" line from each downloaded file -- check it
 # once against the titles below before you build the index.
 # ---------------------------------------------------------------------------
- 
+
 authors:
   mark_twain:
     display_name: "Mark Twain"
- 
+
     # Short, factual reference info a curator supplies to help the model
     # correctly resolve names/nicknames the author uses for family members
     # -- this directly fixes the "mama" = wife (not mother), "Clara" =
@@ -27,25 +28,54 @@ authors:
       (son, died in infancy), Olivia Susan Clemens ("Susy"), Clara Clemens,
       and Jane Lampton Clemens ("Jean"). Olivia Clemens died in June 1904 in
       Florence, Italy, after a long illness.
- 
+
+    # Keyword aliases for retrieval (curator-maintained). The embedding model
+    # does not know that "wife" and "Livy" are the same person, or that
+    # "the jumping frog story" lives in passages about Smiley and Simon
+    # Wheeler. When a question contains a trigger word, a SECOND search is
+    # run over only those chunks that literally contain one of the terms
+    # (case-sensitive, so use the capitalisation the texts use; avoid
+    # apostrophes, which Gutenberg prints as curly quotes). Those results
+    # are merged in ahead of the normal ones. `mode` limits a group to one
+    # mode so "wife" in Literature mode never means Livy.
+    retrieval_aliases:
+      - mode: life_process
+        triggers: ["wife", "spouse", "married", "marriage", "livy", "olivia", "mrs. clemens"]
+        terms: ["Livy", "Olivia", "Mrs. Clemens", "my wife"]
+      - mode: life_process
+        triggers: ["daughter", "daughters", "children", "susy", "clara", "jean"]
+        terms: ["Susy", "Clara", "Jean"]
+      - mode: literature
+        triggers: ["jumping frog", "frog story", "calaveras"]
+        terms: ["Smiley", "Simon Wheeler", "Calaveras"]
+
+    # `aliases` are other names students use for a work ("Huck Finn"). A question
+    # containing the full title or any alias is scoped to that work. Add more here
+    # whenever testers find a nickname that is not recognised.
     # Literature corpus: novels / plays / stories -> used for both
     # "specific work" and "across works" (oeuvre) routing paths.
     literature:
       - title: "The Adventures of Tom Sawyer"
         gutenberg_id: 74
+        aliases: ["Tom Sawyer"]
       - title: "Adventures of Huckleberry Finn"
         gutenberg_id: 76
+        aliases: ["Huckleberry Finn", "Huck Finn"]
       - title: "A Connecticut Yankee in King Arthur's Court"
         gutenberg_id: 86
+        aliases: ["Connecticut Yankee", "Yankee in King Arthur's Court"]
       - title: "The Prince and the Pauper"
         gutenberg_id: 1837
+        aliases: ["Prince and the Pauper", "Prince and Pauper"]
       - title: "Life on the Mississippi"
         gutenberg_id: 245
+        aliases: ["Life on the Mississippi"]
       - title: "Sketches New and Old, Complete"
         gutenberg_id: 3189
+        aliases: ["Sketches New and Old"]
       - title: "Sketches New and Old, Part 1"
         gutenberg_id: 5836
- 
+
     # Life & Process corpus: letters / autobiography / essays about craft,
     # worldview, biography -> kept in a completely separate retrieval
     # boundary, never mixed with literature chunks.
@@ -70,19 +100,16 @@ authors:
         gutenberg_id: 3197
       - title: "Mark Twain's Letters, Volume 6 (1907-1910)"
         gutenberg_id: 3198
- 
+
   # Add more authors here later, e.g.:
   # anton_chekhov:
   #   display_name: "Anton Chekhov"
   #   life_process_context: ""
   #   literature: []
   #   life_process: []
+
 # ---------------------------------------------------------------------------
 embedding:
-  # "local"  -> free, runs on CPU, no API calls, no rate limits.
-  # "gemini" -> uses Google's free-tier embedding model instead (needs
-  #             GOOGLE_API_KEY). Only switch to this if you want the whole
-  #             stack on one provider; local is fine and faster to build.
   provider: "local"
   local_model: "sentence-transformers/all-MiniLM-L6-v2"
   gemini_model: "models/text-embedding-004"
@@ -90,14 +117,11 @@ embedding:
 # ---------------------------------------------------------------------------
 llm:
   provider: "groq"
-  gemini_model: "gemini-3.6-flash"
+  gemini_model: "gemini-2.5-flash"
   groq_model: "openai/gpt-oss-120b"
   temperature: 0.2
   max_output_tokens: 800
 
-
-
- 
 # ---------------------------------------------------------------------------
 # Controls on the chatbot's OWN generated voice (not the source corpus).
 generation:
@@ -115,7 +139,6 @@ generation:
   # below with your actual list.
   restricted_terms:
     - "REPLACE_WITH_YOUR_TERM"
- 
 
 # ---------------------------------------------------------------------------
 chunking:
@@ -124,16 +147,26 @@ chunking:
 
 # ---------------------------------------------------------------------------
 retrieval:
+  # Default top_k, used for oeuvre and life_process scope (broad pools --
+  # we want the handful of strongest matches, not a long tail).
   top_k: 5
-  # Chroma returns a *distance* (lower = more similar) for cosine space.
-  # Above this distance we treat the match as "not really relevant" and
-  # trigger the safe fallback instead of calling the LLM.
-  # Now that the vector store uses cosine distance + normalized embeddings
-  # (fixed after the earlier L2/cosine mismatch bug), 0.65 is a reasonable
-  # starting point for all-MiniLM-L6-v2. Run scripts/debug_retrieval.py to
-  # check real distances for your own queries and tighten/loosen this.
+  # A specific-work search is already narrowed to one book, so it's cheap
+  # and safe to search deeper -- this directly helps with buried, very
+  # specific details (e.g. "what books are on the table in Chapter XVII")
+  # that a shallower top_k can miss.
   top_k_specific_work: 8
+  # Chroma returns a *distance* (lower = more similar).
   max_distance: 1.3
+  # Alias search (see retrieval_aliases): how many alias-matched chunks to fetch,
+  # and the most chunks handed to the LLM once they are merged with the normal results.
+  alias_top_k: 5
+  max_results_with_aliases: 8
+
+# ---------------------------------------------------------------------------
+dedup:
+  shingle_size: 10
+  jaccard_threshold: 0.6
+  length_ratio_tolerance: 0.3
 
 # ---------------------------------------------------------------------------
 vectorstore:
@@ -145,16 +178,3 @@ paths:
   corpus_file: "data/processed/corpus.jsonl"
   deduped_corpus_file: "data/processed/corpus.deduped.jsonl"
   dedup_report_file: "data/processed/dedup_report.jsonl"
-
-# ---------------------------------------------------------------------------
-dedup:
-  # Word-sequence length used for near-duplicate fingerprinting.
-  shingle_size: 10
-  # Two sections are treated as the same piece if their shingle overlap
-  # meets this threshold. Raise it (toward 1.0) if you see false matches
-  # in dedup_report.jsonl; lower it if you suspect real duplicates are
-  # slipping through.
-  jaccard_threshold: 0.6
-  # Sections whose lengths differ by more than this fraction are never
-  # compared -- keeps the near-duplicate pass fast on a large bibliography.
-  length_ratio_tolerance: 0.3

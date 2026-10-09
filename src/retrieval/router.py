@@ -19,11 +19,18 @@ This router has three jobs:
 All plain string matching / keyword heuristics, deliberately NOT an LLM
 call: free, instant, deterministic, and testable.
 
-Title matching uses a WINDOWED comparison (title vs. same-length sliding
-windows of the question) rather than a whole-question comparison, because
-a long question dilutes an otherwise clear title mention: "What books
-appear on the table in Chapter XVII of Huckleberry Finn?" scored only
-0.479 against the title as a whole sentence, but 0.778 as a window.
+Title matching (rewritten Oct 2026): a work is matched when its full title
+or a curator-listed alias (config.yaml `aliases`, e.g. "Huck Finn") appears
+as a phrase in the question, or when at least two of its DISTINCTIVE title
+words appear (typo-tolerant, ignoring filler such as "the", "adventures",
+"new", "old"). History worth knowing: the first version compared the whole
+question to the title letter-by-letter, which missed "What books appear on
+the table in Chapter XVII of Huckleberry Finn?" (0.479). A second version
+compared sliding windows and fixed that, but scored "tell me about the
+jumping" at 0.520 against "the prince and the pauper" -- shared filler
+words, not title content -- so "Tell me about the jumping frog story" was
+wrongly scoped to The Prince and the Pauper and answered "not covered".
+Letter-similarity cannot tell filler from content, so it is gone.
 """
 from __future__ import annotations
 
@@ -31,6 +38,7 @@ import difflib
 import re
 from dataclasses import dataclass
 
+from src.config import CONFIG
 
 
 @dataclass
@@ -63,38 +71,67 @@ def is_meta_question(question: str) -> bool:
 
 
 # --- Specific-work vs. oeuvre detection --------------------------------------
-def _windowed_best_ratio(norm_question: str, norm_title: str) -> float:
-    q_words = norm_question.split()
-    t_words = norm_title.split()
-    t_len = len(t_words)
-    if t_len == 0:
-        return 0.0
-    if len(q_words) <= t_len:
-        return difflib.SequenceMatcher(None, norm_question, norm_title).ratio()
-
-    best = 0.0
-    for start in range(0, len(q_words) - t_len + 1):
-        window = " ".join(q_words[start:start + t_len])
-        score = difflib.SequenceMatcher(None, window, norm_title).ratio()
-        best = max(best, score)
-    return best
+# Words that appear in many titles and say nothing about WHICH work is meant.
+_TITLE_STOPWORDS = {
+    "the", "a", "an", "of", "and", "in", "on", "to", "for", "with", "by",
+    "adventures", "new", "old", "complete", "part",
+}
 
 
-def _best_title_match(question: str, known_titles: list[str], threshold: float = 0.5) -> str | None:
+def _aliases_for(title: str) -> list[str]:
+    """Curator-listed alternative names for a work (config.yaml `aliases`)."""
+    for author_cfg in CONFIG.get("authors", {}).values():
+        for key in ("literature", "life_process"):
+            for work in author_cfg.get(key) or []:
+                if work.get("title") == title:
+                    return list(work.get("aliases") or [])
+    return []
+
+
+def _contains_phrase(norm_question: str, norm_phrase: str) -> bool:
+    return bool(norm_phrase) and re.search(r"\b" + re.escape(norm_phrase) + r"\b", norm_question) is not None
+
+
+def _content_words(norm_title: str) -> list[str]:
+    return [w for w in norm_title.split() if w not in _TITLE_STOPWORDS and not w.isdigit()]
+
+
+def _word_present(word: str, question_words: list[str]) -> bool:
+    """Exact match, or a close typo (e.g. "huckelberry", "fin")."""
+    for q in question_words:
+        if q == word:
+            return True
+        if len(q) >= 3 and len(word) >= 3 and difflib.SequenceMatcher(None, q, word).ratio() >= 0.85:
+            return True
+    return False
+
+
+def _best_title_match(question: str, known_titles: list[str], min_fraction: float = 0.66) -> str | None:
+    """Find the work a question names, or None if it names none.
+
+    1. Full title or a curated alias appears as a whole phrase.
+    2. Otherwise, at least two distinctive title words appear and they make
+       up at least `min_fraction` of the title's distinctive words.
+    A question that merely shares filler words with a title never matches.
+    """
     norm_question = _normalize(question)
-    norm_titles = {title: _normalize(title) for title in known_titles}
+    question_words = norm_question.split()
 
-    for title, norm_title in norm_titles.items():
-        if norm_title in norm_question:
-            return title
+    for title in known_titles:
+        for phrase in [title] + _aliases_for(title):
+            if _contains_phrase(norm_question, _normalize(phrase)):
+                return title
 
-    best_title, best_score = None, 0.0
-    for title, norm_title in norm_titles.items():
-        score = _windowed_best_ratio(norm_question, norm_title)
-        if score > best_score:
-            best_title, best_score = title, score
-
-    return best_title if best_score >= threshold else None
+    best_title, best_fraction = None, 0.0
+    for title in known_titles:
+        words = _content_words(_normalize(title))
+        if len(words) < 2:
+            continue
+        hits = sum(1 for w in words if _word_present(w, question_words))
+        fraction = hits / len(words)
+        if hits >= 2 and fraction >= min_fraction and fraction > best_fraction:
+            best_title, best_fraction = title, fraction
+    return best_title
 
 
 # --- Chapter detection --------------------------------------------------------
