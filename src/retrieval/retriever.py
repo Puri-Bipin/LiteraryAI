@@ -2,6 +2,13 @@
 collection, scoped by the router's decision. This is what enforces
 "session boundaries ... without cross-author contamination" and the three
 routing rows in PRD Section 4.
+
+Chapter-aware retrieval (added Oct 2026): when the router found a chapter
+("Chapter XVII of Huckleberry Finn"), the search is further restricted to
+chunks whose section_title is one of that chapter's known spellings. This
+needs no re-indexing -- section_title is already stored as metadata. If a
+chapter filter matches nothing (a book whose headings use an unexpected
+format), we quietly fall back to a whole-book search rather than failing.
 """
 from __future__ import annotations
 
@@ -10,7 +17,7 @@ from langchain_core.documents import Document
 
 from src.config import CONFIG, project_path
 from src.indexing.embeddings import get_embeddings
-from src.retrieval.router import RouteDecision
+from src.retrieval.router import RouteDecision, chapter_variants
 
 _vectorstore: Chroma | None = None
 
@@ -33,26 +40,43 @@ def _build_filter(author_key: str, decision: RouteDecision) -> dict:
     ]
     if decision.scope == "specific_work":
         clauses.append({"work_title": decision.work_title})
+        if decision.chapter:
+            clauses.append({"section_title": {"$in": chapter_variants(decision.chapter)}})
     return {"$and": clauses} if len(clauses) > 1 else clauses[0]
 
 
 def _top_k_for(decision: RouteDecision) -> int:
-    # A specific-work search is already narrowed to one book, so it's cheap
-    # and safe to search deeper -- helps surface buried, very specific
-    # details (e.g. "what books sit on the table in Chapter XVII") that a
-    # shallower top_k can miss in a broader pool.
+    retrieval_cfg = CONFIG["retrieval"]
+    # A whole chapter is only ~8-14 chunks, so when a chapter is named we
+    # fetch enough to cover most of it.
+    if decision.scope == "specific_work" and decision.chapter:
+        return retrieval_cfg.get("top_k_chapter", 12)
+    # A single-work search is already narrowed to one book, so it's cheap
+    # and safe to search deeper than a cross-corpus search.
     if decision.scope == "specific_work":
-        return CONFIG["retrieval"].get("top_k_specific_work", CONFIG["retrieval"]["top_k"])
-    return CONFIG["retrieval"]["top_k"]
+        return retrieval_cfg.get("top_k_specific_work", retrieval_cfg["top_k"])
+    return retrieval_cfg["top_k"]
 
 
 def retrieve(question: str, author_key: str, decision: RouteDecision) -> list[tuple[Document, float]]:
-    """Returns [(document, distance), ...] -- lower distance = more similar."""
-    vectorstore = get_vectorstore()
-    where = _build_filter(author_key, decision)
-    top_k = _top_k_for(decision)
+    """Returns [(document, distance), ...] -- lower distance = more similar.
 
-    return vectorstore.similarity_search_with_score(query=question, k=top_k, filter=where)
+    May clear decision.chapter if the chapter filter matched nothing, so
+    callers can tell whether chapter scoping actually took effect.
+    """
+    vectorstore = get_vectorstore()
+
+    results = vectorstore.similarity_search_with_score(
+        query=question, k=_top_k_for(decision), filter=_build_filter(author_key, decision)
+    )
+
+    if not results and decision.chapter:
+        decision.chapter = None
+        results = vectorstore.similarity_search_with_score(
+            query=question, k=_top_k_for(decision), filter=_build_filter(author_key, decision)
+        )
+
+    return results
 
 
 def filter_by_relevance(scored_docs: list[tuple[Document, float]]) -> list[tuple[Document, float]]:

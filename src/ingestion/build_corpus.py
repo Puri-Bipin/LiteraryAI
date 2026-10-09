@@ -26,6 +26,7 @@ import re
 from src.config import CONFIG, project_path, iter_works
 from src.ingestion.clean_text import clean
 from src.ingestion.download_gutenberg import slugify
+from src.section_utils import drop_toc_stubs
 
 # Matches four known Gutenberg heading styles used across Twain's works:
 #   1. "CHAPTER I.", "Chapter 3", "ACT III", "SCENE 2"
@@ -93,6 +94,9 @@ def build_corpus() -> None:
                 raw_text = raw_path.read_text(encoding="utf-8")
                 body = clean(raw_text)
                 sections = split_into_sections(body)
+                # Gutenberg texts open with a table of contents; each contents line
+                # was being split off as its own tiny "section". Remove them.
+                sections, stubs_dropped = drop_toc_stubs(sections)
 
                 for idx, (section_title, section_text) in enumerate(sections, start=1):
                     record = {
@@ -108,7 +112,8 @@ def build_corpus() -> None:
                     out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
                     record_count += 1
 
-                print(f"[ok] {display_name} / {work_title}: {len(sections)} sections")
+                print(f"[ok] {display_name} / {work_title}: {len(sections)} sections"
+                      f" (dropped {stubs_dropped} table-of-contents stubs)")
 
     print(f"\nWrote {record_count} section records to {out_path}")
 
