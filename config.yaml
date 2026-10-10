@@ -39,19 +39,28 @@ authors:
     # are merged in ahead of the normal ones. `mode` limits a group to one
     # mode so "wife" in Literature mode never means Livy.
     retrieval_aliases:
+      # role: entity (default) = a person/story to look for by name.
+      # role: topic = an event word, used ONLY together with an entity match:
+      #   a question about "the death of his wife" then requires a chunk that
+      #   contains BOTH a name for her AND a death word, which is what finds
+      #   "Last night ... I entered Mrs. Clemens's room ... and she was dead."
       - mode: life_process
+        role: entity
         triggers: ["wife", "spouse", "married", "marriage", "livy", "olivia", "mrs. clemens"]
         terms: ["Livy", "Olivia", "Mrs. Clemens", "my wife"]
       - mode: life_process
+        role: entity
         triggers: ["daughter", "daughters", "children", "susy", "clara", "jean"]
         terms: ["Susy", "Clara", "Jean"]
+      - mode: life_process
+        role: topic
+        triggers: ["death", "died", "die", "dies", "dying", "dead", "funeral", "passed away", "passing", "loss", "lost", "grief", "mourn", "mourning"]
+        terms: ["died", "Died", "dead", "Dead", "death", "Death", "funeral", "Funeral", "buried"]
       - mode: literature
+        role: entity
         triggers: ["jumping frog", "frog story", "calaveras"]
         terms: ["Smiley", "Simon Wheeler", "Calaveras"]
 
-    # `aliases` are other names students use for a work ("Huck Finn"). A question
-    # containing the full title or any alias is scoped to that work. Add more here
-    # whenever testers find a nickname that is not recognised.
     # Literature corpus: novels / plays / stories -> used for both
     # "specific work" and "across works" (oeuvre) routing paths.
     literature:
@@ -155,12 +164,20 @@ retrieval:
   # specific details (e.g. "what books are on the table in Chapter XVII")
   # that a shallower top_k can miss.
   top_k_specific_work: 8
-  # Chroma returns a *distance* (lower = more similar).
+  # Chroma returns a *distance* (lower = more similar). A result farther than
+  # max_distance is treated as "not really relevant" and never reaches the LLM.
   max_distance: 1.3
+  # A looser cutoff for SCOPED searches: a question that names a work/chapter
+  # (the search is already confined to it) or that matched a keyword alias
+  # (the passage literally contains the name). Ranking inside such a small,
+  # already-relevant set is meaningful even when the question is phrased
+  # generically ("What happens in A Connecticut Yankee?"), and a tight cutoff
+  # there only produces false "not covered" answers.
+  max_distance_scoped: 2.0
   # Alias search (see retrieval_aliases): how many alias-matched chunks to fetch,
-  # and the most chunks handed to the LLM once they are merged with the normal results.
-  alias_top_k: 5
-  max_results_with_aliases: 8
+  # and the most chunks handed to the LLM once merged with the normal results.
+  alias_top_k: 8
+  max_results_with_aliases: 10
 
 # ---------------------------------------------------------------------------
 dedup:

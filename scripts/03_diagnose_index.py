@@ -106,13 +106,13 @@ def test_filtered_query(question: str, author_key: str, mode: str):
         meta = doc.metadata
         print(f"    distance={score:.4f}  work_title={meta.get('work_title')!r}  section={meta.get('section_title')!r}")
 
-    survivors = filter_by_relevance(scored)
-    max_distance = CONFIG["retrieval"]["max_distance"]
-    print(f"  after filter_by_relevance (max_distance={max_distance}): {len(survivors)} survive")
+    survivors = filter_by_relevance(scored, decision)
+    cfg = CONFIG["retrieval"]
+    print(f"  after filter_by_relevance (max_distance={cfg['max_distance']}, scoped={cfg.get('max_distance_scoped')}): {len(survivors)} survive")
     if not survivors and scored:
         best = min(d for _, d in scored)
         print(f"  >>> Best available distance was {best:.4f} -- threshold rejected it. "
-              f"This means real content WAS found but max_distance is cutting it off.")
+              f"This means real content WAS found but the distance cutoff is rejecting it.")
     print()
 
 

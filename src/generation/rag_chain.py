@@ -54,6 +54,10 @@ indirect, but suggests...") rather than stating it as settled fact.
 3. If the source passages do not contain enough information to answer the question, say so \
 plainly instead of filling the gap from general knowledge. Never invent quotes, plot details, \
 or biographical facts.
+   If the passages stop partway through an episode, say that they stop there. Do NOT describe, \
+summarize, or hint at what happens next, how it ends, or any twist -- not even a famous one \
+you remember -- and do not mention events the passages do not contain, even to say they are \
+"not quoted here".
 4. You are extending close reading of the primary text, not replacing it -- where useful, point \
 the student back to the specific chapter/section for further reading.
 5. Never use offensive, slurring, or otherwise restricted language in your own voice or \
@@ -105,6 +109,7 @@ class RagAnswer:
     work_title: str | None
     grounded: bool
     sources: list[dict] = field(default_factory=list)
+    chapter: str | None = None  # set when retrieval was restricted to one chapter
 
 
 def _build_system_prompt(author_display: str, author_key: str, mode: str) -> str:
@@ -207,7 +212,17 @@ def answer_question(
         )
 
     scored_docs = retrieve(question, author_key, decision)
-    relevant_docs = filter_by_relevance(scored_docs)
+
+    # NOTE: retrieve() clears decision.chapter if the chapter filter matched
+    # nothing, so check it AFTER the call.
+    if decision.chapter:
+        # The student named a chapter. The metadata filter already guarantees
+        # these passages are the right ones, so don't let the similarity
+        # threshold throw away a chapter the student explicitly asked for --
+        # and present them in reading order, not similarity order.
+        relevant_docs = sorted(scored_docs, key=lambda pair: pair[0].metadata.get("chunk_index", 0))
+    else:
+        relevant_docs = filter_by_relevance(scored_docs, decision)
 
     if not relevant_docs:
         return RagAnswer(
@@ -216,11 +231,17 @@ def answer_question(
             work_title=decision.work_title,
             grounded=False,
             sources=[],
+            chapter=decision.chapter,
         )
 
     context = _format_context(relevant_docs)
     system = _build_system_prompt(author_display, author_key, mode)
-    human = f"SOURCE PASSAGES:\n\n{context}\n\nSTUDENT QUESTION: {question}"
+    chapter_note = (
+        f"NOTE: The student asked specifically about Chapter {decision.chapter} of "
+        f"{decision.work_title}. All passages below come from that chapter, in reading order.\n\n"
+        if decision.chapter else ""
+    )
+    human = f"{chapter_note}SOURCE PASSAGES:\n\n{context}\n\nSTUDENT QUESTION: {question}"
 
     llm = get_llm()
     response = llm.invoke([SystemMessage(content=system), HumanMessage(content=human)])
@@ -234,4 +255,5 @@ def answer_question(
         work_title=decision.work_title,
         grounded=True,
         sources=_sources_payload(relevant_docs),
+        chapter=decision.chapter,
     )
