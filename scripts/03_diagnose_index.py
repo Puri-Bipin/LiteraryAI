@@ -102,9 +102,12 @@ def test_filtered_query(question: str, author_key: str, mode: str):
 
     scored = retrieve(question, author_key, decision)
     print(f"  {len(scored)} results from the FILTERED search:")
-    for doc, score in scored:
+    for rank, (doc, score) in enumerate(scored, 1):
         meta = doc.metadata
-        print(f"    distance={score:.4f}  work_title={meta.get('work_title')!r}  section={meta.get('section_title')!r}")
+        tag = " [alias/keyword/neighbour]" if meta.get("_via_alias") else ""
+        snippet = doc.page_content[:90].replace("\n", " ")
+        print(f"    [{rank}] distance={score:.4f}  {meta.get('work_title')!r} / {meta.get('section_title')!r} #{meta.get('chunk_index')}{tag}")
+        print(f"         {snippet!r}")
 
     survivors = filter_by_relevance(scored, decision)
     cfg = CONFIG["retrieval"]
@@ -116,9 +119,38 @@ def test_filtered_query(question: str, author_key: str, mode: str):
     print()
 
 
+def find_phrase(phrase: str):
+    """Lists every chunk in the live index that contains an exact phrase.
+    Use it to check whether a passage you expect is actually indexed."""
+    print(f"=== Chunks containing the exact phrase {phrase!r} ===")
+    from src.retrieval.retriever import get_vectorstore
+
+    got = get_vectorstore()._collection.get(
+        where_document={"$contains": phrase}, include=["documents", "metadatas"], limit=25
+    )
+    docs, metas = got.get("documents") or [], got.get("metadatas") or []
+    print(f"  {len(docs)} chunk(s) found (showing up to 25)")
+    for text, meta in zip(docs, metas):
+        at = max(text.find(phrase) - 50, 0)
+        print(f"  - {meta.get('work_title')!r} / {meta.get('section_title')!r} #{meta.get('chunk_index')}")
+        print(f"      ...{text[at:at + 160]!r}")
+    print()
+
+
 if __name__ == "__main__":
-    check_deduped_corpus()
-    check_vectorstore()
-    question = sys.argv[1] if len(sys.argv) > 1 else "Tell me more about the story of Huckleberry Finn"
-    test_raw_query(question)
-    test_filtered_query(question, author_key="mark_twain", mode="literature")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Inspect the live index and what the app retrieves.")
+    parser.add_argument("question", nargs="?", default="Tell me more about the story of Huckleberry Finn")
+    parser.add_argument("--mode", default="literature", choices=["literature", "life_process"],
+                        help="which mode to simulate (default: literature)")
+    parser.add_argument("--find", default=None, help="also list chunks containing this exact phrase")
+    parser.add_argument("--quick", action="store_true", help="skip the corpus and vector-store summaries")
+    args = parser.parse_args()
+
+    if not args.quick:
+        check_deduped_corpus()
+        check_vectorstore()
+    test_filtered_query(args.question, author_key="mark_twain", mode=args.mode)
+    if args.find:
+        find_phrase(args.find)

@@ -56,6 +56,13 @@ authors:
         role: topic
         triggers: ["death", "died", "die", "dies", "dying", "dead", "funeral", "passed away", "passing", "loss", "lost", "grief", "mourn", "mourning"]
         terms: ["died", "Died", "dead", "Dead", "death", "Death", "funeral", "Funeral", "buried"]
+      # A "how did he FEEL" question: ask for a chunk that also contains a reaction word
+      # ("our hearts broke", "I wish I were with Livy"). Substring match, so "heart" also
+      # finds "hearts". Ignored unless a name group fired; add words as testers find gaps.
+      - mode: life_process
+        role: topic
+        triggers: ["feel", "felt", "feeling", "feelings", "grief", "grieve", "sorrow", "mourn", "mourning", "react", "reaction", "heartbroken", "sad"]
+        terms: ["heart", "grief", "sorrow", "broke", "tears", "wept", "lonely", "wish I"]
       - mode: literature
         role: entity
         triggers: ["jumping frog", "frog story", "calaveras"]

@@ -32,6 +32,13 @@ Model Boy passage in Chapter V is mostly about a church service, so by
 meaning alone it lost every slot to an illustration list that repeats the
 caption; a literal search finds it. See src/retrieval/keyphrases.py.
 
+A question can carry SEVERAL topic words ("feel" + "death"); each triggered
+topic group must match, so "How did Twain feel about the death of his wife?"
+asks for a chunk with a name for her AND a death word AND a reaction word
+("our hearts broke", "I wish I were with Livy"). That singled out the Howells
+letter, which a name+death search alone ranked below Paine's narration.
+Strictest combination first, then progressively looser ones fill any gaps.
+
 Relevance gate: scoped searches (a named work/chapter, or an alias match)
 use the looser `max_distance_scoped`; see config.yaml for why.
 """
@@ -89,10 +96,11 @@ def _top_k_for(decision: RouteDecision) -> int:
     return retrieval_cfg["top_k"]
 
 
-def _alias_terms(question: str, author_key: str, decision: RouteDecision) -> tuple[list[str], list[str]]:
-    """(entity_terms, topic_terms) whose trigger words appear in the question
+def _alias_terms(question: str, author_key: str, decision: RouteDecision) -> tuple[list[str], list[list[str]]]:
+    """(entity_terms, topic_groups) whose trigger words appear in the question
     (whole-word, case-insensitive), limited to groups for the current mode.
 
+    topic_groups is one term list per triggered topic group, in config order.
     Topic terms are only returned when at least one entity group also fired:
     "death" on its own must not turn into a text filter."""
     mode = "life_process" if decision.scope == "life_process" else "literature"
@@ -100,7 +108,7 @@ def _alias_terms(question: str, author_key: str, decision: RouteDecision) -> tup
     lowered = question.lower()
 
     entity_terms: list[str] = []
-    topic_terms: list[str] = []
+    topic_groups: list[list[str]] = []
     for group in groups:
         if group.get("mode") not in (None, mode):
             continue
@@ -110,14 +118,18 @@ def _alias_terms(question: str, author_key: str, decision: RouteDecision) -> tup
         )
         if not triggered:
             continue
-        bucket = topic_terms if group.get("role") == "topic" else entity_terms
-        for term in group.get("terms", []):
-            if term not in bucket:
-                bucket.append(term)
+        if group.get("role") == "topic":
+            terms = list(group.get("terms", []))
+            if terms:
+                topic_groups.append(terms)
+        else:
+            for term in group.get("terms", []):
+                if term not in entity_terms:
+                    entity_terms.append(term)
 
     if not entity_terms:
         return [], []
-    return entity_terms, topic_terms
+    return entity_terms, topic_groups
 
 
 def _any_of(terms: list[str]) -> dict:
@@ -127,11 +139,10 @@ def _any_of(terms: list[str]) -> dict:
     return {"$or": [{"$contains": term} for term in terms]}
 
 
-def _where_document(entity_terms: list[str], topic_terms: list[str] | None = None) -> dict:
-    """A chunk must contain one entity term and, if given, one topic term."""
-    if topic_terms:
-        return {"$and": [_any_of(entity_terms), _any_of(topic_terms)]}
-    return _any_of(entity_terms)
+def _where_document(entity_terms: list[str], topic_groups: list[list[str]] | None = None) -> dict:
+    """A chunk must contain one entity term and one term from EACH topic group given."""
+    parts = [_any_of(entity_terms)] + [_any_of(group) for group in (topic_groups or []) if group]
+    return parts[0] if len(parts) == 1 else {"$and": parts}
 
 
 def _ignore_words(author_key: str) -> set[str]:
@@ -222,20 +233,19 @@ def _merge(alias_results: list, normal_results: list, limit: int) -> list:
 
 
 def _alias_search(vectorstore, question: str, author_key: str, decision: RouteDecision,
-                  entity_terms: list[str], topic_terms: list[str]) -> list:
+                  entity_terms: list[str], topic_groups: list[list[str]]) -> list:
     """Alias-matched chunks, tagged so the relevance gate can treat them as scoped.
 
-    With a topic word, try "name AND topic" first and top up with name-only
-    matches if that finds fewer than asked for."""
+    Tries the strictest combination first (name AND every topic), then drops
+    topics one at a time, and finally name-only, topping up until alias_top_k
+    chunks are found."""
     k = CONFIG["retrieval"].get("alias_top_k", 8)
     where = _build_filter(author_key, decision)
 
-    found: list = []
-    attempts = []
-    if topic_terms:
-        attempts.append(_where_document(entity_terms, topic_terms))
+    attempts = [_where_document(entity_terms, topic_groups[:n]) for n in range(len(topic_groups), 0, -1)]
     attempts.append(_where_document(entity_terms))
 
+    found: list = []
     for where_document in attempts:
         try:
             batch = vectorstore.similarity_search_with_score(
@@ -274,9 +284,9 @@ def retrieve(question: str, author_key: str, decision: RouteDecision) -> list[tu
         )
 
     extra: list = []
-    entity_terms, topic_terms = _alias_terms(question, author_key, decision)
+    entity_terms, topic_groups = _alias_terms(question, author_key, decision)
     if entity_terms:
-        extra += _alias_search(vectorstore, question, author_key, decision, entity_terms, topic_terms)
+        extra += _alias_search(vectorstore, question, author_key, decision, entity_terms, topic_groups)
     extra += _keyword_search(vectorstore, question, author_key, decision)
 
     if extra:
