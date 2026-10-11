@@ -192,6 +192,20 @@ def _apply_restricted_term_filter(text: str, restricted_terms: list[str]) -> str
     return "".join(parts)
 
 
+TRUNCATION_NOTICE = (
+    "\n\n*(This answer was cut off because it reached the length limit. "
+    "Try a narrower question, or ask me to continue.)*"
+)
+
+
+def _was_truncated(response) -> bool:
+    """True if the model stopped because it ran out of tokens, not because it finished.
+    Gemini reports finish_reason "MAX_TOKENS"; Groq/OpenAI-style models report "length"."""
+    metadata = getattr(response, "response_metadata", None) or {}
+    reason = str(metadata.get("finish_reason", "")).lower()
+    return reason in {"max_tokens", "length"}
+
+
 def answer_question(
     question: str,
     author_key: str,
@@ -248,6 +262,8 @@ def answer_question(
 
     restricted_terms = CONFIG.get("generation", {}).get("restricted_terms", [])
     filtered_answer = _apply_restricted_term_filter(response.content, restricted_terms)
+    if _was_truncated(response):
+        filtered_answer = (filtered_answer.strip() or "(No text was produced.)") + TRUNCATION_NOTICE
 
     return RagAnswer(
         answer=filtered_answer,

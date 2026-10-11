@@ -129,7 +129,9 @@ llm:
   gemini_model: "gemini-2.5-flash"
   groq_model: "openai/gpt-oss-120b"
   temperature: 0.2
-  max_output_tokens: 800
+  # Includes the model's hidden reasoning tokens (Gemini 2.5 / gpt-oss think before they write),
+  # so 800 cut answers off mid-sentence. Raise it further if the notice "cut off" ever appears.
+  max_output_tokens: 4096
 
 # ---------------------------------------------------------------------------
 # Controls on the chatbot's OWN generated voice (not the source corpus).
@@ -177,7 +179,10 @@ retrieval:
   # Alias search (see retrieval_aliases): how many alias-matched chunks to fetch,
   # and the most chunks handed to the LLM once merged with the normal results.
   alias_top_k: 8
-  max_results_with_aliases: 10
+  # Literal-phrase search: how many chunks to fetch that contain a capitalised term from the
+  # question ("Model Boy", "Aunt Polly", "Smiley") word for word.
+  keyword_top_k: 6
+  max_results_with_aliases: 12
 
 # ---------------------------------------------------------------------------
 dedup:

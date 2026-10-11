@@ -46,6 +46,9 @@ class RouteDecision:
     scope: str                  # "meta" | "specific_work" | "oeuvre" | "life_process"
     work_title: str | None      # set only when scope == "specific_work"
     chapter: str | None = None  # e.g. "XVII" or "THE LAST"; only with specific_work
+    # Set when the question names SEVERAL works ("How is Tom Sawyer related to
+    # Huckleberry Finn?"); work_title then holds a display string "A + B".
+    work_titles: list[str] | None = None
 
 
 def _normalize(s: str) -> str:
@@ -106,21 +109,25 @@ def _word_present(word: str, question_words: list[str]) -> bool:
     return False
 
 
-def _best_title_match(question: str, known_titles: list[str], min_fraction: float = 0.66) -> str | None:
-    """Find the work a question names, or None if it names none.
+def _matched_titles(question: str, known_titles: list[str], min_fraction: float = 0.66) -> list[str]:
+    """Every work the question names, in config order ([] if it names none).
 
-    1. Full title or a curated alias appears as a whole phrase.
-    2. Otherwise, at least two distinctive title words appear and they make
-       up at least `min_fraction` of the title's distinctive words.
+    1. Full title or a curated alias appears as a whole phrase -- ALL such works.
+    2. Otherwise the single work with at least two distinctive title words in
+       the question making up at least `min_fraction` of its distinctive words.
     A question that merely shares filler words with a title never matches.
     """
     norm_question = _normalize(question)
     question_words = norm_question.split()
 
+    named = []
     for title in known_titles:
         for phrase in [title] + _aliases_for(title):
             if _contains_phrase(norm_question, _normalize(phrase)):
-                return title
+                named.append(title)
+                break
+    if named:
+        return named
 
     best_title, best_fraction = None, 0.0
     for title in known_titles:
@@ -131,7 +138,12 @@ def _best_title_match(question: str, known_titles: list[str], min_fraction: floa
         fraction = hits / len(words)
         if hits >= 2 and fraction >= min_fraction and fraction > best_fraction:
             best_title, best_fraction = title, fraction
-    return best_title
+    return [best_title] if best_title else []
+
+
+def _best_title_match(question: str, known_titles: list[str], min_fraction: float = 0.66) -> str | None:
+    matched = _matched_titles(question, known_titles, min_fraction)
+    return matched[0] if matched else None
 
 
 # --- Chapter detection --------------------------------------------------------
@@ -214,12 +226,16 @@ def route_question(question: str, mode: str, known_literature_titles: list[str])
     if mode == "life_process":
         return RouteDecision(scope="life_process", work_title=None)
 
-    matched_title = _best_title_match(question, known_literature_titles)
-    if matched_title:
+    matched = _matched_titles(question, known_literature_titles)
+    if len(matched) >= 2:
+        # e.g. "How is Tom Sawyer related to Huckleberry Finn?" -- search BOTH
+        # books, not whichever happens to be listed first.
+        return RouteDecision(scope="specific_work", work_title=" + ".join(matched), work_titles=matched)
+    if matched:
         # A chapter number only means something once we know which book.
         return RouteDecision(
             scope="specific_work",
-            work_title=matched_title,
+            work_title=matched[0],
             chapter=parse_chapter(question),
         )
 

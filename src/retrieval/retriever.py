@@ -26,6 +26,12 @@ containing BOTH ("Mrs. Clemens" AND "dead"). Without that, "How did Twain
 feel about the death of his wife?" ranked ~170 chunks that mention Livy by
 meaning alone and missed the one that says "she was dead".
 
+Literal-phrase search (Oct 2026): capitalised terms in the question ("Model
+Boy", "Aunt Polly", "Smiley") are also searched for word for word. The
+Model Boy passage in Chapter V is mostly about a church service, so by
+meaning alone it lost every slot to an illustration list that repeats the
+caption; a literal search finds it. See src/retrieval/keyphrases.py.
+
 Relevance gate: scoped searches (a named work/chapter, or an alias match)
 use the looser `max_distance_scoped`; see config.yaml for why.
 """
@@ -38,6 +44,7 @@ from langchain_core.documents import Document
 
 from src.config import CONFIG, project_path
 from src.indexing.embeddings import get_embeddings
+from src.retrieval.keyphrases import extract_key_phrases, phrase_variants
 from src.retrieval.router import RouteDecision, chapter_variants
 
 _vectorstore: Chroma | None = None
@@ -60,8 +67,11 @@ def _build_filter(author_key: str, decision: RouteDecision) -> dict:
         {"mode": "life_process" if decision.scope == "life_process" else "literature"},
     ]
     if decision.scope == "specific_work":
-        clauses.append({"work_title": decision.work_title})
-        if decision.chapter:
+        titles = decision.work_titles or [decision.work_title]
+        clauses.append(
+            {"work_title": titles[0]} if len(titles) == 1 else {"work_title": {"$in": titles}}
+        )
+        if decision.chapter and len(titles) == 1:
             clauses.append({"section_title": {"$in": chapter_variants(decision.chapter)}})
     return {"$and": clauses} if len(clauses) > 1 else clauses[0]
 
@@ -122,6 +132,76 @@ def _where_document(entity_terms: list[str], topic_terms: list[str] | None = Non
     if topic_terms:
         return {"$and": [_any_of(entity_terms), _any_of(topic_terms)]}
     return _any_of(entity_terms)
+
+
+def _ignore_words(author_key: str) -> set[str]:
+    """Words that never count as a 'named thing': the author's name and every
+    word in a work's title or alias ("Tom", "Sawyer", "Huckleberry", "Finn")."""
+    author_cfg = CONFIG["authors"].get(author_key, {})
+    words = set(re.findall(r"[a-z']+", str(author_cfg.get("display_name", "")).lower()))
+    for key in ("literature", "life_process"):
+        for work in author_cfg.get(key) or []:
+            for phrase in [work.get("title", "")] + list(work.get("aliases") or []):
+                for word in re.findall(r"[a-z']+", phrase.lower()):
+                    words.add(re.sub(r"['\u2019]s?$", "", word))
+    return words
+
+
+def _keyword_search(vectorstore, question: str, author_key: str, decision: RouteDecision) -> list:
+    """Chunks that contain a capitalised term from the question word for word,
+    ranked by meaning within that set. Tagged so the relevance gate treats
+    them as scoped. Returns [] on any problem."""
+    phrases = extract_key_phrases(question, _ignore_words(author_key))
+    if not phrases:
+        return []
+    try:
+        found = vectorstore.similarity_search_with_score(
+            query=question,
+            k=CONFIG["retrieval"].get("keyword_top_k", 6),
+            filter=_build_filter(author_key, decision),
+            where_document=_any_of(phrase_variants(phrases)),
+        )
+    except Exception as exc:  # never let the extra search break an answer
+        print(f"[retriever] keyword search skipped: {exc}")
+        return []
+    for doc, _score in found:
+        doc.metadata["_via_alias"] = True
+    return found
+
+
+NEIGHBOUR_HITS = 2  # expand only the best few hits, to keep the context short
+
+
+def _neighbours(vectorstore, hits: list) -> list:
+    """The chunks immediately before and after the best alias/keyword hits.
+
+    A hit often lands mid-passage: "she was dead" is in one chunk and Twain's
+    own reaction ("How sweet she was in death...") is in the next, where he
+    says "she" rather than naming her, so a name-based search cannot match it.
+    Same section only; each neighbour inherits its hit's distance. Returns []
+    on any problem."""
+    out: list = []
+    for doc, score in hits[:NEIGHBOUR_HITS]:
+        meta = doc.metadata
+        index = meta.get("chunk_index")
+        if not isinstance(index, int) or "work_title" not in meta or "section_title" not in meta:
+            continue
+        try:
+            got = vectorstore.get(
+                where={"$and": [
+                    {"work_title": meta["work_title"]},
+                    {"section_title": meta["section_title"]},
+                    {"chunk_index": {"$in": [index - 1, index + 1]}},
+                ]},
+                include=["documents", "metadatas"],
+            )
+        except Exception as exc:
+            print(f"[retriever] neighbour lookup skipped: {exc}")
+            continue
+        for text, neighbour_meta in zip(got.get("documents") or [], got.get("metadatas") or []):
+            neighbour = Document(page_content=text, metadata={**neighbour_meta, "_via_alias": True})
+            out.append((neighbour, score))
+    return out
 
 
 def _chunk_key(doc: Document) -> tuple:
@@ -193,11 +273,16 @@ def retrieve(question: str, author_key: str, decision: RouteDecision) -> list[tu
             query=question, k=top_k, filter=_build_filter(author_key, decision)
         )
 
+    extra: list = []
     entity_terms, topic_terms = _alias_terms(question, author_key, decision)
     if entity_terms:
-        alias_results = _alias_search(vectorstore, question, author_key, decision, entity_terms, topic_terms)
-        limit = max(top_k, CONFIG["retrieval"].get("max_results_with_aliases", 10))
-        results = _merge(alias_results, results, limit)
+        extra += _alias_search(vectorstore, question, author_key, decision, entity_terms, topic_terms)
+    extra += _keyword_search(vectorstore, question, author_key, decision)
+
+    if extra:
+        extra = extra + _neighbours(vectorstore, extra)
+        limit = max(top_k, CONFIG["retrieval"].get("max_results_with_aliases", 12))
+        results = _merge(extra, results, limit)
 
     return results
 
