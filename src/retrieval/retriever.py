@@ -263,6 +263,21 @@ def _alias_search(vectorstore, question: str, author_key: str, decision: RouteDe
     return found
 
 
+def _interleave(result_lists: list[list]) -> list:
+    """Round-robin across several ranked lists (best of each first), without repeats."""
+    merged, seen = [], set()
+    longest = max((len(r) for r in result_lists), default=0)
+    for rank in range(longest):
+        for results in result_lists:
+            if rank < len(results):
+                doc, score = results[rank]
+                key = _chunk_key(doc)
+                if key not in seen:
+                    seen.add(key)
+                    merged.append((doc, score))
+    return merged
+
+
 def retrieve(question: str, author_key: str, decision: RouteDecision) -> list[tuple[Document, float]]:
     """Returns [(document, distance), ...] -- lower distance = more similar.
 
@@ -272,9 +287,23 @@ def retrieve(question: str, author_key: str, decision: RouteDecision) -> list[tu
     vectorstore = get_vectorstore()
     top_k = _top_k_for(decision)
 
-    results = vectorstore.similarity_search_with_score(
-        query=question, k=top_k, filter=_build_filter(author_key, decision)
-    )
+    titles = decision.work_titles or []
+    if decision.scope == "specific_work" and len(titles) > 1:
+        # Several works named ("How is Tom Sawyer related to Huckleberry Finn?"):
+        # search each one separately and interleave, so every named book is
+        # represented rather than the one with more matching passages winning all slots.
+        per_work = max(2, -(-top_k // len(titles)))  # ceiling division
+        results = _interleave([
+            vectorstore.similarity_search_with_score(
+                query=question, k=per_work,
+                filter=_build_filter(author_key, RouteDecision(scope="specific_work", work_title=title)),
+            )
+            for title in titles
+        ])
+    else:
+        results = vectorstore.similarity_search_with_score(
+            query=question, k=top_k, filter=_build_filter(author_key, decision)
+        )
 
     if not results and decision.chapter:
         decision.chapter = None

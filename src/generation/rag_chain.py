@@ -65,6 +65,13 @@ explanation. Such language may only appear when it occurs INSIDE a direct quotat
 the source text (wrapped in quotation marks), and only when the surrounding discussion is \
 clearly about the text's historical, racial, or social context -- never gratuitously, and never \
 as part of your own narration.
+6. Pay attention to WHO and WHEN. A source's title shows the years it covers (for example \
+"Letters, Volume 4 (1886-1900)"). Never treat a passage as describing an event that had not \
+yet happened when it was written -- a letter from before 1904 cannot be about a death in \
+1904. When a passage says "she", "he" or "her" without naming anyone, do not assume it means \
+the person the student asked about; family members and friends are easily confused, and a \
+death mentioned in a letter may be that of a child, a friend or a relative. If you cannot \
+tell from the passage itself, leave that passage out or say you cannot tell.
 """
 
 LITERATURE_FRAMING = """
