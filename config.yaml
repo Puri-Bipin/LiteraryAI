@@ -26,8 +26,19 @@ authors:
       "mama," it means Olivia (the wife), NOT Twain's own mother (Jane
       Lampton Clemens). Twain and Olivia's children were: Langdon Clemens
       (son, died in infancy), Olivia Susan Clemens ("Susy"), Clara Clemens,
-      and Jane Lampton Clemens ("Jean"). Olivia Clemens died in June 1904 in
-      Florence, Italy, after a long illness.
+      and Jane Lampton Clemens ("Jean").
+      DEATHS, to keep events apart: Susy died in August 1896, while Twain
+      and Livy were abroad. Olivia ("Livy") died on 5 June 1904 in Florence,
+      Italy, after a long illness. Jean died in December 1909. So a passage
+      written before 1904 cannot describe Livy's death, and a passage in
+      which "she" has died may well be about Susy (1896) or Jean (1909).
+      WHO IS SPEAKING: the six volumes of "Mark Twain's Letters" were edited
+      by Albert Bigelow Paine, who wrote narration between the letters.
+      Third-person description of Twain ("Clemens wrote...", "He was full of
+      ideas...", "Mark Twain's work was always...") is Paine's commentary,
+      NOT Twain's own words or feelings. Twain's own words are the letters
+      themselves (usually signed "S. L. C." or "S. L. CLEMENS").
+      "Chapters from My Autobiography" is Twain's own writing.
 
     # Keyword aliases for retrieval (curator-maintained). The embedding model
     # does not know that "wife" and "Livy" are the same person, or that
@@ -46,14 +57,17 @@ authors:
       #   "Last night ... I entered Mrs. Clemens's room ... and she was dead."
       - mode: life_process
         role: entity
+        name: wife
         triggers: ["wife", "spouse", "married", "marriage", "livy", "olivia", "mrs. clemens"]
         terms: ["Livy", "Olivia", "Mrs. Clemens", "my wife"]
       - mode: life_process
         role: entity
+        name: children
         triggers: ["daughter", "daughters", "children", "susy", "clara", "jean"]
         terms: ["Susy", "Clara", "Jean"]
       - mode: life_process
         role: topic
+        name: death
         triggers: ["death", "died", "die", "dies", "dying", "dead", "funeral", "passed away", "passing", "loss", "lost", "grief", "mourn", "mourning"]
         terms: ["died", "Died", "dead", "Dead", "death", "Death", "funeral", "Funeral", "buried"]
       # A "how did he FEEL" question: ask for a chunk that also contains a reaction word
@@ -61,12 +75,26 @@ authors:
       # finds "hearts". Ignored unless a name group fired; add words as testers find gaps.
       - mode: life_process
         role: topic
+        name: feeling
         triggers: ["feel", "felt", "feeling", "feelings", "grief", "grieve", "sorrow", "mourn", "mourning", "react", "reaction", "heartbroken", "sad"]
         terms: ["heart", "grief", "sorrow", "broke", "tears", "wept", "lonely", "wish I"]
       - mode: literature
         role: entity
+        name: frog
         triggers: ["jumping frog", "frog story", "calaveras"]
         terms: ["Smiley", "Simon Wheeler", "Calaveras"]
+
+    # Event windows: some questions can only be answered from certain volumes.
+    # `when` lists alias-group names that must ALL fire. Livy died in June 1904, so a
+    # question about the death of Twain's wife is answered only from material written
+    # after it. Without this, a passage about his daughter Susy's death (1896, in the
+    # 1886-1900 volume) -- which also mentions Livy -- was shown as Twain mourning his wife.
+    event_windows:
+      - when: ["wife", "death"]
+        only_works:
+          - "Chapters from My Autobiography"
+          - "Mark Twain's Letters, Volume 5 (1901-1906)"
+          - "Mark Twain's Letters, Volume 6 (1907-1910)"
 
     # Literature corpus: novels / plays / stories -> used for both
     # "specific work" and "across works" (oeuvre) routing paths.

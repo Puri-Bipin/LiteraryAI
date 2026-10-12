@@ -49,6 +49,9 @@ class RouteDecision:
     # Set when the question names SEVERAL works ("How is Tom Sawyer related to
     # Huckleberry Finn?"); work_title then holds a display string "A + B".
     work_titles: list[str] | None = None
+    # Set by the retriever when an event window applies (see config.yaml
+    # event_windows): search only these works. Life & Process only.
+    only_works: list[str] | None = None
 
 
 def _normalize(s: str) -> str:

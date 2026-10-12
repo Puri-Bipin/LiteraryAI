@@ -94,7 +94,9 @@ Additional guidance for this Life & Process question:
 For a broad question (e.g. "tell me about his life"), cover multiple phases or aspects if the \
 sources allow it, rather than resting on a single anecdote.
 - Pay close attention to family relationships and nicknames; do not assume a term means what it \
-would in general usage if the reference context below says otherwise.
+would in general usage if the reference context below says otherwise. The reference context also says who died when, and who is speaking: the editor's narration \
+in the Letters volumes is NOT Twain's own words or feelings, so never present it as his. \
+Attribute it to the editor, and use Twain's own letters when asked how Twain felt.
 {context_block}
 """
 
@@ -127,8 +129,8 @@ def _build_system_prompt(author_display: str, author_key: str, mode: str) -> str
         raw_context = CONFIG["authors"].get(author_key, {}).get("life_process_context", "")
         raw_context = (raw_context or "").strip()
         context_block = (
-            f"Reference context about {author_display}'s family (curator-provided -- use ONLY "
-            f"to correctly identify who people and nicknames refer to; this is NOT a source "
+            f"Reference context about {author_display}'s family (curator-provided -- use it to tell who people are, when events "
+            f"happened, and who is speaking; this is NOT a source "
             f"citation and should never be the sole basis for a claim):\n{raw_context}"
             if raw_context else ""
         )

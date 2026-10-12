@@ -73,6 +73,8 @@ def _build_filter(author_key: str, decision: RouteDecision) -> dict:
         {"author_key": author_key},
         {"mode": "life_process" if decision.scope == "life_process" else "literature"},
     ]
+    if decision.scope == "life_process" and decision.only_works:
+        clauses.append({"work_title": {"$in": list(decision.only_works)}})
     if decision.scope == "specific_work":
         titles = decision.work_titles or [decision.work_title]
         clauses.append(
@@ -96,28 +98,33 @@ def _top_k_for(decision: RouteDecision) -> int:
     return retrieval_cfg["top_k"]
 
 
+def _triggered_groups(question: str, author_key: str, decision: RouteDecision) -> list[dict]:
+    """Alias groups whose trigger words appear in the question (whole-word,
+    case-insensitive), limited to groups for the current mode."""
+    mode = "life_process" if decision.scope == "life_process" else "literature"
+    groups = CONFIG["authors"].get(author_key, {}).get("retrieval_aliases") or []
+    lowered = question.lower()
+    fired = []
+    for group in groups:
+        if group.get("mode") not in (None, mode):
+            continue
+        if any(
+            re.search(r"\b" + re.escape(str(trigger).lower()) + r"\b", lowered)
+            for trigger in group.get("triggers", [])
+        ):
+            fired.append(group)
+    return fired
+
+
 def _alias_terms(question: str, author_key: str, decision: RouteDecision) -> tuple[list[str], list[list[str]]]:
-    """(entity_terms, topic_groups) whose trigger words appear in the question
-    (whole-word, case-insensitive), limited to groups for the current mode.
+    """(entity_terms, topic_groups) for the groups the question triggers.
 
     topic_groups is one term list per triggered topic group, in config order.
     Topic terms are only returned when at least one entity group also fired:
     "death" on its own must not turn into a text filter."""
-    mode = "life_process" if decision.scope == "life_process" else "literature"
-    groups = CONFIG["authors"].get(author_key, {}).get("retrieval_aliases") or []
-    lowered = question.lower()
-
     entity_terms: list[str] = []
     topic_groups: list[list[str]] = []
-    for group in groups:
-        if group.get("mode") not in (None, mode):
-            continue
-        triggered = any(
-            re.search(r"\b" + re.escape(str(trigger).lower()) + r"\b", lowered)
-            for trigger in group.get("triggers", [])
-        )
-        if not triggered:
-            continue
+    for group in _triggered_groups(question, author_key, decision):
         if group.get("role") == "topic":
             terms = list(group.get("terms", []))
             if terms:
@@ -126,10 +133,27 @@ def _alias_terms(question: str, author_key: str, decision: RouteDecision) -> tup
             for term in group.get("terms", []):
                 if term not in entity_terms:
                     entity_terms.append(term)
-
     if not entity_terms:
         return [], []
     return entity_terms, topic_groups
+
+
+def _event_window(question: str, author_key: str, decision: RouteDecision) -> list[str] | None:
+    """Works a question is limited to, if it matches a configured event window.
+
+    A window applies when every alias group named in its `when` list fired,
+    e.g. ["wife", "death"] -> only material written after Livy died."""
+    if decision.scope != "life_process":
+        return None
+    windows = CONFIG["authors"].get(author_key, {}).get("event_windows") or []
+    if not windows:
+        return None
+    fired = {group.get("name") for group in _triggered_groups(question, author_key, decision)}
+    for window in windows:
+        needed = set(window.get("when", []))
+        if needed and needed <= fired and window.get("only_works"):
+            return list(window["only_works"])
+    return None
 
 
 def _any_of(terms: list[str]) -> dict:
@@ -286,6 +310,7 @@ def retrieve(question: str, author_key: str, decision: RouteDecision) -> list[tu
     """
     vectorstore = get_vectorstore()
     top_k = _top_k_for(decision)
+    decision.only_works = _event_window(question, author_key, decision)
 
     titles = decision.work_titles or []
     if decision.scope == "specific_work" and len(titles) > 1:
@@ -301,6 +326,12 @@ def retrieve(question: str, author_key: str, decision: RouteDecision) -> list[tu
             for title in titles
         ])
     else:
+        results = vectorstore.similarity_search_with_score(
+            query=question, k=top_k, filter=_build_filter(author_key, decision)
+        )
+
+    if not results and decision.only_works:
+        decision.only_works = None  # the window held nothing: search normally rather than return nothing
         results = vectorstore.similarity_search_with_score(
             query=question, k=top_k, filter=_build_filter(author_key, decision)
         )
