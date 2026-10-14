@@ -37,6 +37,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.config import CONFIG
 from src.generation.llm import get_llm
+from src.generation.quote_check import find_unmatched_quotes, quote_check_note
 from src.retrieval.retriever import filter_by_relevance, retrieve
 from src.retrieval.router import RouteDecision, route_question
 
@@ -72,6 +73,9 @@ yet happened when it was written -- a letter from before 1904 cannot be about a 
 the person the student asked about; family members and friends are easily confused, and a \
 death mentioned in a letter may be that of a child, a friend or a relative. If you cannot \
 tell from the passage itself, leave that passage out or say you cannot tell.
+7. Anything inside quotation marks must be copied EXACTLY from a source passage, word for word, \
+including pronouns ("they" must not become "we"). Use "..." to skip words and [square brackets] for \
+any word you must add. If you are summarising or rephrasing, do not use quotation marks.
 """
 
 LITERATURE_FRAMING = """
@@ -83,6 +87,8 @@ the following passages, one could argue that..."
 - Present the supporting passage(s), then a brief synthesis.
 - End by inviting the student's own reading, e.g. "What's your own take on this?" or "Does the \
 evidence suggest a different reading to you?"
+- If the question names two or more works, draw evidence from EACH of them, and say so plainly \
+if one of them has no relevant passage among the sources.
 - This framing does NOT apply to purely factual questions (e.g. "what happens in Chapter 3", \
 "how did Tom convince the boys to paint the fence") -- answer those directly and factually, \
 without the interpretive hedge.
@@ -273,6 +279,8 @@ def answer_question(
     filtered_answer = _apply_restricted_term_filter(response.content, restricted_terms)
     if _was_truncated(response):
         filtered_answer = (filtered_answer.strip() or "(No text was produced.)") + TRUNCATION_NOTICE
+    # Flag any quotation that cannot be found word for word in what the model was shown.
+    filtered_answer += quote_check_note(find_unmatched_quotes(filtered_answer, system + "\n" + human))
 
     return RagAnswer(
         answer=filtered_answer,
